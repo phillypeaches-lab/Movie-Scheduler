@@ -14,6 +14,27 @@ THEATER_ID = "4343"
 # -------------------------------------------------
 # UTILITIES
 # -------------------------------------------------
+def fetch_available_days():
+    url = "https://www.bigscreen.com/Marquee.php?theater=4343&view=sched"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    days = []
+    for td in soup.select("td.scheddaterow"):
+        a = td.find("a")
+        if a:
+            day_text = a.get_text(separator=" ", strip=True)  # e.g., "Sat 10/18"
+            day_href = a['href']  # e.g., "...&showdate=2025-10-18..."
+            # Extract showdate from href
+            import re
+            match = re.search(r"showdate=(\d{4}-\d{2}-\d{2})", day_href)
+            if match:
+                showdate = match.group(1)
+                days.append({"label": day_text, "date": showdate})
+    return days
+
+
 def format_showtime(dt):
     """Format datetime to BigScreen style (AM -> add 'a', PM -> just time)."""
     hour = dt.hour
@@ -26,32 +47,50 @@ def format_showtime(dt):
         return f"{display_hour}:{minute:02d}"
 
 
-def parse_bigscreen_time(t_str, base_date=None):
-    """Convert BigScreen time (like '10:30a' or '7:20') into datetime using a fixed base date."""
-    if base_date is None:
-        base_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+def parse_bigscreen_time(t_str, selected_date=None):
+    """
+    Converts BigScreen showtime string like '10:30a' or '7:20' into a datetime object.
+    If selected_date is provided (YYYY-MM-DD), showtime is anchored on that day.
+    """
+    import datetime
 
     t_str = t_str.strip().lower()
     is_am = t_str.endswith("a")
     if is_am:
-        t_str = t_str[:-1]
+        t_str = t_str[:-1]  # remove trailing 'a'
 
     hour, minute = map(int, t_str.split(":"))
-    if not is_am and hour != 12:
+    if not is_am and hour != 12:  # PM times except 12 PM
         hour += 12
 
-    return base_date.replace(hour=hour, minute=minute)
+    # Determine base date
+    if selected_date:
+        base_date = datetime.datetime.strptime(selected_date, "%Y-%m-%d")
+    else:
+        base_date = datetime.datetime.today()
+
+    return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
 
 
 def fetch_showtimes_by_scraping():
     """Scrape current showtimes from BigScreen.com."""
-    import re
+    import requests, re
+    from bs4 import BeautifulSoup
 
-    url = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
-    resp = requests.get(url)
+    base_url = "https://www.bigscreen.com/Marquee.php"
+    params = {
+        "theater": "4343",
+        "view": "sched",
+        "sort": "date"
+    }
+    if selected_date:
+        params["showdate"] = selected_date
+
+    resp = requests.get(base_url, params=params)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
-
+    
     movies = []
     for row in soup.select("tr.graybar_0, tr.graybar_1"):
         title_elem = row.select_one("td.col_movie a.movieNameList")
@@ -88,7 +127,7 @@ def fetch_showtimes_by_scraping():
 from itertools import product, permutations
 from datetime import timedelta
 
-def schedule_movies(selected_movies, min_gap=-5):
+def schedule_movies(selected_movies, min_gap=-5,selected_date=None):
     """
     Generate all valid schedules and return a list of dicts:
     [{'schedule': [...], 'total_gap': ...}, ...]
@@ -101,7 +140,7 @@ def schedule_movies(selected_movies, min_gap=-5):
         showtimes = []
         for st in m["showtimes"]:
             try:
-                start = parse_bigscreen_time(st)
+                start = parse_bigscreen_time(st,selected_date)
             except:
                 continue
             end = start + timedelta(minutes=m["runtime"])
@@ -140,6 +179,26 @@ def schedule_movies(selected_movies, min_gap=-5):
 # -------------------------------------------------
 # ROUTES
 # -------------------------------------------------
+@app.route("/days", methods=["GET"])
+def get_days():
+    import requests
+    from bs4 import BeautifulSoup
+
+    url = "https://www.bigscreen.com/Marquee.php?theater=4343&view=sched"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    days = []
+    for td in soup.select("td.scheddaterow a"):
+        href = td.get("href")
+        date_param = href.split("showdate=")[-1].split("&")[0]  # extract YYYY-MM-DD
+        display_text = td.get_text(strip=True).replace("\n", " ")
+        days.append({"date": date_param, "label": display_text})
+
+    return {"days": days}
+
+
 @app.route("/movies", methods=["GET"])
 def get_movies():
     movies = fetch_showtimes_by_scraping()
@@ -153,12 +212,13 @@ def get_schedule():
     data = request.get_json()
     selected_titles = data.get("movies", [])
     min_gap = data.get("min_gap", -5)
+    selected_date = data.get("date")  # e.g., "2025-10-18"
     show_more = data.get("show_more", False)  # <-- shortcut can send this
 
     movies = fetch_showtimes_by_scraping()
     selected_movies = [m for m in movies if m["name"] in selected_titles]
 
-    all_schedules = schedule_movies(selected_movies, min_gap)
+    all_schedules = schedule_movies(selected_movies, min_gap, selected_date)
 
     if not all_schedules:
         return jsonify({"error": "No valid schedules found"}), 400
