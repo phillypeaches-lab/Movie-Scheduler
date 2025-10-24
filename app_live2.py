@@ -1,3 +1,4 @@
+#Schedules based on time of day, nothing before current time.
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
@@ -44,13 +45,16 @@ def parse_bigscreen_time(t_str, base_date=None):
 
 
 def fetch_showtimes_by_scraping():
-    """Scrape current showtimes from BigScreen.com."""
+    """Scrape current showtimes from BigScreen.com, ignoring past showtimes."""
     import re
 
     url = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
     resp = requests.get(url)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
+
+    now = datetime.now()
+    today_base = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     movies = []
     for row in soup.select("tr.graybar_0, tr.graybar_1"):
@@ -59,6 +63,7 @@ def fetch_showtimes_by_scraping():
             continue
         name = title_elem.get_text(strip=True)
 
+        # Runtime extraction
         runtime_elem = row.select_one("td.col_movie span.small")
         runtime = 120
         if runtime_elem:
@@ -67,16 +72,27 @@ def fetch_showtimes_by_scraping():
                 hours, minutes = int(match.group(1)), int(match.group(2))
                 runtime = hours * 60 + minutes
 
+        # Extract and filter showtimes
         showtime_elems = row.select("td.col_showtimes a[target='ExternalSite']")
-        showtimes = [a.get_text(strip=True).lower()
-                     for a in showtime_elems
-                     if re.match(r"^\d{1,2}:\d{2}a?$", a.get_text(strip=True).lower())]
+        all_showtimes = [a.get_text(strip=True).lower()
+                         for a in showtime_elems
+                         if re.match(r"^\d{1,2}:\d{2}a?$", a.get_text(strip=True).lower())]
 
-        if showtimes:
+        # ✅ Filter out past showtimes
+        valid_showtimes = []
+        for st in all_showtimes:
+            try:
+                show_dt = parse_bigscreen_time(st, base_date=today_base)
+                if show_dt >= now:
+                    valid_showtimes.append(st)
+            except Exception:
+                continue
+
+        if valid_showtimes:
             movies.append({
                 "name": name,
                 "runtime": runtime,
-                "showtimes": showtimes
+                "showtimes": valid_showtimes
             })
 
     return movies
@@ -140,7 +156,6 @@ def schedule_movies(selected_movies, min_gap=-5):
     return all_valid_schedules
 
 
-
 # -----------------------------
 # Flask routes
 # -----------------------------
@@ -173,8 +188,9 @@ def get_schedule():
     # pick the best
     best_schedule = all_schedules[0]
 
-    def format_schedule(s):
+    def format_schedule(s, total_selected):
         lines = []
+        lines.append(f"🎬 Schedule includes {s['movies_count']} of {total_selected} selected movies\n")
         for item in s["schedule"]:
             start_str = format_showtime(item["start"])
             end_str = format_showtime(item["end"])
@@ -182,12 +198,17 @@ def get_schedule():
         lines.append(f"\nTotal gap time: {s['total_gap']}")
         return "\n".join(lines)
 
+
+    total_selected = len(selected_movies)
+
     if show_more:
-        # return all schedules
-        return jsonify([format_schedule(s) for s in all_schedules])
+        return jsonify([format_schedule(s, total_selected) for s in all_schedules])
     else:
-        # return only the best schedule
-        return format_schedule(best_schedule), 200, {"Content-Type": "text/plain; charset=utf-8"}
+        return (
+            format_schedule(best_schedule, total_selected),
+            200,
+            {"Content-Type": "text/plain; charset=utf-8"})
+
 
 
 
@@ -196,4 +217,4 @@ def get_schedule():
 # Run locally
 # -----------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5001)
