@@ -5,6 +5,13 @@ import requests
 from bs4 import BeautifulSoup
 from itertools import permutations, product
 import re
+import pytz
+from datetime import datetime
+
+THEATER_TZ = pytz.timezone("America/New_York")
+
+def now_local():
+    return datetime.now(THEATER_TZ)
 
 app = Flask(__name__)
 
@@ -107,6 +114,8 @@ def fetch_showtimes_by_scraping(showdate=None):
     today = datetime.today().date()
     target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
     now = datetime.now()
+    print(f"[DEBUG] Server current time: {now} (local system time)")
+    print(f"[DEBUG] Target date: {target_date}")
 
     merged = {}
 
