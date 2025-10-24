@@ -348,33 +348,34 @@ def get_schedule():
 
     best_schedule = all_schedules[0]
 
-    # Format output
-def format_schedule(s):
-    lines = [
-        f"Date: {showdate}",
-        f"{len(s['schedule'])} out of {MoviesSelected} movies selected"
-    ]
-    
-    prev_start = None
-    prev_movie = None
-    for item in s["schedule"]:
-        start_str = format_showtime(item["start"])
-        end_str = format_showtime(item["end"])
-        lines.append(f"{item['movie']}: {start_str} - {end_str}")
-        
-        # Check for short start-to-start gap warning
-        if prev_start:
-            gap = (item["start"] - prev_start).total_seconds() / 60  # gap in minutes
-            if gap <= 90:
-                lines.append(f"⚠️ Warning: {prev_movie} and {item['movie']} start less than 91 minutes apart")
-        
-        prev_start = item["start"]
-        prev_movie = item["movie"]
-    
-    lines.append(f"\nTotal gap time: {s['total_gap']}")
-    return "\n".join(lines)
+        # Format output
+    def format_schedule(s):
+        lines = [
+            f"Date: {showdate}",
+            f"{len(s['schedule'])} out of {MoviesSelected} movies selected"
+        ]
 
+        prev_start = None
+        prev_movie = None
+        for item in s["schedule"]:
+            start_str = format_showtime(item["start"])
+            end_str = format_showtime(item["end"])
+            lines.append(f"{item['movie']}: {start_str} - {end_str}")
 
+            # Check for short start-to-start gap warning
+            if prev_start:
+                gap = (item["start"] - prev_start).total_seconds() / 60  # gap in minutes
+                if gap <= 90:
+                    lines.append(f"⚠️ Warning: {prev_movie} and {item['movie']} start less than 91 minutes apart")
+
+            prev_start = item["start"]
+            prev_movie = item["movie"]
+
+        lines.append(f"\nTotal gap time: {s['total_gap']}")
+        return "\n".join(lines)
+
+    # ✅ Actually return the formatted schedule!
+    return format_schedule(best_schedule)
 
 
 # -------------------------------------------------
