@@ -40,9 +40,9 @@ def format_showtime(dt):
 
 
 def parse_bigscreen_time(t_str, base_date=None):
-    """Convert BigScreen time (like '10:30a' or '7:20') into datetime using a fixed base date."""
+    """Convert BigScreen time (like '10:30a' or '7:20') into timezone-aware datetime."""
     if base_date is None:
-        base_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+        base_date = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
 
     t_str = t_str.strip().lower()
     is_am = t_str.endswith("a")
@@ -53,7 +53,9 @@ def parse_bigscreen_time(t_str, base_date=None):
     if not is_am and hour != 12:
         hour += 12
 
-    return base_date.replace(hour=hour, minute=minute)
+    local_dt = base_date.replace(hour=hour, minute=minute)
+    return THEATER_TZ.localize(local_dt) if local_dt.tzinfo is None else local_dt
+
 
 
 # -------------------------------------------------
@@ -113,9 +115,11 @@ def fetch_showtimes_by_scraping(showdate=None):
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    today = datetime.today().date()
-    target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
-    now = datetime.now()
+    now = now_local()
+    today = now.date()
+    target_date = now.date() if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
+    print(f"[DEBUG] Server current time (NY local): {now}")
+
     print(f"[DEBUG] Server current time: {now} (local system time)")
     print(f"[DEBUG] Target date: {target_date}")
 
