@@ -14,6 +14,8 @@ def now_local():
     return datetime.now(THEATER_TZ)
 
 app = Flask(__name__)
+print(f"[DEBUG] Render server time (UTC): {datetime.utcnow()}")
+print(f"[DEBUG] Render local time (NY): {now_local()}")
 
 # -------------------------------------------------
 # CONFIGURATION
