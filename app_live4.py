@@ -292,33 +292,40 @@ def get_schedule():
     selected_titles = data.get("movies", [])
     min_gap = data.get("min_gap", -5)
     showdate = data.get("showdate")
+    show_more = data.get("show_more", False)
     MoviesSelected = data.get("MoviesSelected")
-    start_time_str = data.get("start_time")
-    end_time_str = data.get("end_time")
+
+    # Optional timeframe
+    start_time_str = data.get("start_time")  # e.g., "16:00"
+    end_time_str = data.get("end_time")      # e.g., "20:00"
 
     if not showdate:
         return jsonify({"error": "Must provide showdate"}), 400
 
+    # Fetch movies for the selected date
     movies = fetch_showtimes_by_scraping(showdate)
     if not movies:
         return jsonify({"error": f"No movies found for {showdate}"}), 404
 
+    # Filter movies by selection
     selected_movies = [m for m in movies if m["name"] in selected_titles]
     if not selected_movies:
         return jsonify({"error": "None of the selected movies are available on this date"}), 404
 
-    # Filter by timeframe
+    # ✅ Apply time window filter
     def filter_timeframe(m):
         filtered_showtimes = []
         for st in m["showtimes"]:
             start_dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate, "%Y-%m-%d"))
             end_dt = start_dt + timedelta(minutes=m["runtime"])
 
+            # Filter by start_time
             if start_time_str:
                 start_limit = datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M")
                 if start_dt < start_limit:
                     continue
 
+            # Filter by end_time
             if end_time_str:
                 end_limit = datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M")
                 if end_dt > end_limit:
@@ -327,50 +334,37 @@ def get_schedule():
             filtered_showtimes.append(st)
 
         m["showtimes"] = filtered_showtimes
-        return bool(filtered_showtimes)
+        return bool(filtered_showtimes)  # keep movie only if at least one showtime remains
 
     selected_movies = list(filter(filter_timeframe, selected_movies))
+
     if not selected_movies:
         return jsonify({"error": "No movies match the selected time window"}), 400
 
+    # Generate schedules
     all_schedules = schedule_movies(selected_movies, min_gap)
     if not all_schedules:
         return jsonify({"error": "No valid schedules found"}), 400
 
     best_schedule = all_schedules[0]
 
-    # ✅ Output formatter
+    # Format output
     def format_schedule(s):
         lines = [
             f"Date: {showdate}",
-            f"{len(s['schedule'])} of {MoviesSelected} movies selected",
-            ""
+            f"{len(s['schedule'])} out of {MoviesSelected} movies selected"
         ]
-
-        prev_start = None
-        prev_movie = None
         for item in s["schedule"]:
             start_str = format_showtime(item["start"])
             end_str = format_showtime(item["end"])
-            lines.append(f"{item['movie']}\nStart: {start_str}\nEnd:   {end_str}")
-
-            # Warning if next start is within 90 minutes
-            if prev_start:
-                gap = (item["start"] - prev_start).total_seconds() / 60
-                if gap <= 90:
-                    lines.append(
-                        f"WARNING: '{prev_movie}' and '{item['movie']}' start only {int(gap)} minutes apart!"
-                    )
-
-            lines.append("")  # blank line between entries
-            prev_start = item["start"]
-            prev_movie = item["movie"]
-
-        lines.append(f"Total gap time: {s['total_gap']}")
+            lines.append(f"{item['movie']}: {start_str} - {end_str}")
+        lines.append(f"\nTotal gap time: {s['total_gap']}")
         return "\n".join(lines)
 
-    return format_schedule(best_schedule)
-
+    if show_more:
+        return jsonify([format_schedule(s) for s in all_schedules])
+    else:
+        return format_schedule(best_schedule), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 
