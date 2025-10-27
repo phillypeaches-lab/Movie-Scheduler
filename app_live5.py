@@ -298,22 +298,25 @@ def get_schedule():
     if not selected_movies:
         return jsonify({"error": "None of the selected movies are available on this date"}), 404
 
-    # ✅ Apply time window filter
     def filter_timeframe(m):
         filtered_showtimes = []
         for st in m["showtimes"]:
+            # Parse showtime and make it UTC-aware
             start_dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate, "%Y-%m-%d"))
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
             end_dt = start_dt + timedelta(minutes=m["runtime"])
 
-            # Filter by start_time
+            # Filter by start_time if provided
             if start_time_str:
                 start_limit = datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M")
+                start_limit = start_limit.replace(tzinfo=timezone.utc)
                 if start_dt < start_limit:
                     continue
 
-            # Filter by end_time
+            # Filter by end_time if provided
             if end_time_str:
                 end_limit = datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M")
+                end_limit = end_limit.replace(tzinfo=timezone.utc)
                 if end_dt > end_limit:
                     continue
 
