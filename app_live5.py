@@ -266,6 +266,7 @@ def get_movies():
 
 @app.route("/schedule", methods=["POST"])
 def get_schedule():
+    current_time = get_current_time()  # 🔥 This should print to Render logs
     data = request.get_json()
     if not data:
         return jsonify({"error": "Must provide JSON body"}), 400
