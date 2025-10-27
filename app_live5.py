@@ -6,12 +6,15 @@ from bs4 import BeautifulSoup
 from itertools import permutations, product
 import re
 from datetime import datetime, timezone
+import sys  # 👈 add this import at the top
 
 def get_current_time():
     """Return the current UTC time and a formatted string for debugging."""
     now_utc = datetime.now(timezone.utc)
-    print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+    sys.stdout.flush()  # 👈 ensure it appears in logs
     return now_utc
+
 
 app = Flask(__name__)
 
