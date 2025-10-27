@@ -1,10 +1,17 @@
-#last stable version Make new version to tackle timezone shift
+#new version to tackle timezone shift
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 from itertools import permutations, product
 import re
+from datetime import datetime, timezone
+
+def get_current_time():
+    """Return the current UTC time and a formatted string for debugging."""
+    now_utc = datetime.now(timezone.utc)
+    print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    return now_utc
 
 app = Flask(__name__)
 
@@ -249,6 +256,9 @@ def get_days():
 
 @app.route("/movies", methods=["GET"])
 def get_movies():
+    # Debug print to confirm UTC time on Render
+    current_time = get_current_time()
+
     showdate = request.args.get("showdate")
     movies = fetch_showtimes_by_scraping(showdate)
     return jsonify([m["name"] for m in movies])
@@ -336,4 +346,4 @@ def get_schedule():
 # RUN LOCALLY
 # -------------------------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5003)
+    app.run(host="0.0.0.0", port=5004)

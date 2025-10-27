@@ -1,4 +1,4 @@
-#2+day selector+output formatting
+#2+day selector+output formatting+accounting for duplicates (diff languages)
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
@@ -45,6 +45,7 @@ def parse_bigscreen_time(t_str, base_date=None):
         hour += 12
 
     return base_date.replace(hour=hour, minute=minute)
+
 
 
 # -------------------------------------------------
@@ -107,11 +108,13 @@ def fetch_showtimes_by_scraping(showdate=None):
     today = datetime.today().date()
     target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
     now = datetime.now()
+    print(f"[DEBUG] Server current time: {now} (local system time)")
+    print(f"[DEBUG] Target date: {target_date}")
 
     merged = {}
 
-    for row in soup.select("tr.graybar_0, tr.graybar_1"):
-        title_elem = row.select_one("td.col_movie a.movieNameList")
+    for row in soup.select("tr:has(td.col_movie a[href*='NowShowing.php?movie='])"):
+        title_elem = row.select_one("td.col_movie a[href*='NowShowing.php?movie=']")
         if not title_elem:
             continue
 
@@ -126,24 +129,32 @@ def fetch_showtimes_by_scraping(showdate=None):
                 hours, minutes = int(match.group(1)), int(match.group(2))
                 runtime = hours * 60 + minutes
 
-        showtime_elems = row.select("td.col_showtimes a[target='ExternalSite']")
         showtimes = []
-        for a in showtime_elems:
-            st = a.get_text(strip=True).lower()
-            if not re.match(r"^\d{1,2}:\d{2}a?$", st):
-                continue
+        showtimes_cell = row.select_one("td.col_showtimes")
+        if showtimes_cell:
+            text = showtimes_cell.get_text(" ", strip=True)
+            time_matches = re.findall(r"\b\d{1,2}:\d{2}\s*(?:a|p|am|pm)?\b", text, flags=re.I)
 
-            dt = parse_bigscreen_time(st)
-            # Only skip past times if showdate is today
-            if target_date == today and dt < now:
-                continue
+            for st in time_matches:
+                st_clean = st.lower().replace(" ", "")
+                if not re.match(r"^\d{1,2}:\d{2}(?:a|p|am|pm)?$", st_clean):
+                    continue
 
-            showtimes.append(st)
+                st_clean = re.sub(r"am$", "a", st_clean)
+                st_clean = re.sub(r"pm$", "", st_clean)
+
+                try:
+                    dt = parse_bigscreen_time(st_clean)
+                    if target_date == today and dt < now:
+                        continue
+                    showtimes.append(st_clean)
+                except Exception as e:
+                    print(f"⚠️ Skipping invalid time '{st}' for {name}: {e}")
 
         if not showtimes:
-            continue
+            print(f"⚠️ No showtimes found for {name}, keeping movie anyway.")
+            showtimes = ["(showtimes unavailable)"]
 
-        # ✅ Merge if title already exists
         if title_key in merged:
             merged[title_key]["showtimes"].extend(showtimes)
         else:
@@ -153,7 +164,6 @@ def fetch_showtimes_by_scraping(showdate=None):
                 "showtimes": showtimes
             }
 
-    # ✅ Deduplicate and sort showtimes
     for v in merged.values():
         v["showtimes"] = sorted(set(v["showtimes"]))
 
