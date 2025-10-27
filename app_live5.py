@@ -14,6 +14,9 @@ def get_current_time():
     print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
     sys.stdout.flush()  # 👈 ensure it appears in logs
     return now_utc
+def get_today_utc_date():
+    """Return today's date in UTC (for consistent comparison on Render)."""
+    return datetime.now(timezone.utc).date()
 
 
 app = Flask(__name__)
@@ -41,9 +44,9 @@ def format_showtime(dt):
 
 
 def parse_bigscreen_time(t_str, base_date=None):
-    """Convert BigScreen time (like '10:30a' or '7:20') into datetime using a fixed base date."""
+    """Convert BigScreen time (like '10:30a' or '7:20') into UTC-aware datetime."""
     if base_date is None:
-        base_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+        base_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     t_str = t_str.strip().lower()
     is_am = t_str.endswith("a")
@@ -54,7 +57,8 @@ def parse_bigscreen_time(t_str, base_date=None):
     if not is_am and hour != 12:
         hour += 12
 
-    return base_date.replace(hour=hour, minute=minute)
+    return base_date.replace(hour=hour, minute=minute, tzinfo=timezone.utc)
+
 
 
 # -------------------------------------------------
@@ -67,7 +71,7 @@ def fetch_available_days():
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    today = datetime.today().date()
+    today = get_today_utc_date()
     days = []
 
     for cell in soup.select("td.scheddaterow, td.scheddaterow_sel"):
@@ -108,9 +112,9 @@ def fetch_showtimes_by_scraping(showdate=None):
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    today = datetime.today().date()
+    today = get_today_utc_date()
     target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     merged = {}
 
