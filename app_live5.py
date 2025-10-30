@@ -285,8 +285,22 @@ def get_movies():
 
 @app.route("/schedule", methods=["POST"])
 def get_schedule():
-    print(f"[DEBUG] User selected window: {start_time_str}–{end_time_str} local ({THEATER_TZ})", flush=True)
-    print(f"[DEBUG] Converted to UTC window: {start_limit_utc}–{end_limit_utc}", flush=True)
+    # Safe debugging — handles missing start_time_str/end_time_str
+    start_time_str_safe = locals().get("start_time_str", None)
+    end_time_str_safe = locals().get("end_time_str", None)
+
+    print(
+        f"[DEBUG] User selected window: {start_time_str_safe or 'N/A'}–{end_time_str_safe or 'N/A'} local ({THEATER_TZ})",
+        flush=True,
+    )
+    try:
+        print(
+            f"[DEBUG] Converted to UTC window: {start_limit_utc if 'start_limit_utc' in locals() else 'N/A'}–{end_limit_utc if 'end_limit_utc' in locals() else 'N/A'}",
+            flush=True,
+        )
+    except Exception as e:
+        print(f"[DEBUG] UTC conversion print skipped: {e}", flush=True)
+
 
     current_time = get_current_time()  # 🔥 This should print to Render logs
     data = request.get_json()
