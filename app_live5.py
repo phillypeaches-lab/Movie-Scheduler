@@ -6,14 +6,18 @@ from bs4 import BeautifulSoup
 from itertools import permutations, product
 import re
 from datetime import datetime, timezone
-import sys  # 👈 add this import at the top
 import pytz
+import sys
+
 THEATER_TZ = pytz.timezone("America/New_York")
-now_utc = datetime.now(pytz.utc)
+
+# Print both UTC and local time at startup
+now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
 local_now = now_utc.astimezone(THEATER_TZ)
 
-print(f"[DEBUG] Startup UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
-print(f"[DEBUG] Startup local time ({THEATER_TZ.zone}): {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+print(f"[DEBUG] Server boot time UTC:   {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+print(f"[DEBUG] Server boot time Local: {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+sys.stdout.flush()
 
 def get_current_time():
     """Return the current UTC time and a formatted string for debugging."""
