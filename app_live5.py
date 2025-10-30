@@ -1,4 +1,4 @@
-#new version to tackle timezone shift
+#4+new version to tackle timezone shift
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import requests
@@ -7,6 +7,8 @@ from itertools import permutations, product
 import re
 from datetime import datetime, timezone
 import sys  # 👈 add this import at the top
+import pytz
+THEATER_TZ = pytz.timezone("America/New_York")
 
 def get_current_time():
     """Return the current UTC time and a formatted string for debugging."""
@@ -46,7 +48,7 @@ def format_showtime(dt):
 def parse_bigscreen_time(t_str, base_date=None):
     """Convert BigScreen time (like '10:30a' or '7:20') into UTC-aware datetime."""
     if base_date is None:
-        base_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        base_date = datetime.now(THEATER_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
 
     t_str = t_str.strip().lower()
     is_am = t_str.endswith("a")
@@ -56,8 +58,12 @@ def parse_bigscreen_time(t_str, base_date=None):
     hour, minute = map(int, t_str.split(":"))
     if not is_am and hour != 12:
         hour += 12
+    if is_am and hour == 12:
+        hour = 0  # handle 12:xxa as midnight
 
-    return base_date.replace(hour=hour, minute=minute, tzinfo=timezone.utc)
+    local_dt = base_date.replace(hour=hour, minute=minute, tzinfo=THEATER_TZ)
+    return local_dt.astimezone(timezone.utc)
+
 
 
 
@@ -153,8 +159,14 @@ def fetch_showtimes_by_scraping(showdate=None):
                 dt = parse_bigscreen_time(st)
             except Exception:
                 continue
-            if target_date == today and dt < now:
+
+
+            local_now = datetime.now(THEATER_TZ)
+            dt_local = dt.astimezone(THEATER_TZ)
+            if target_date == local_now.date() and dt_local < local_now:
                 continue
+
+
             filtered_showtimes.append(st)
 
 
@@ -273,6 +285,9 @@ def get_movies():
 
 @app.route("/schedule", methods=["POST"])
 def get_schedule():
+    print(f"[DEBUG] User selected window: {start_time_str}–{end_time_str} local ({THEATER_TZ})", flush=True)
+    print(f"[DEBUG] Converted to UTC window: {start_limit_utc}–{end_limit_utc}", flush=True)
+
     current_time = get_current_time()  # 🔥 This should print to Render logs
     data = request.get_json()
     if not data:
@@ -308,17 +323,20 @@ def get_schedule():
 
             # Filter by start_time if provided
             if start_time_str:
-                start_limit = datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M")
-                start_limit = start_limit.replace(tzinfo=timezone.utc)
-                if start_dt < start_limit:
+                # interpret user input as local time
+                start_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M"))
+                start_limit_utc = start_limit_local.astimezone(timezone.utc)
+                if start_dt < start_limit_utc:
                     continue
+
 
             # Filter by end_time if provided
             if end_time_str:
-                end_limit = datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M")
-                end_limit = end_limit.replace(tzinfo=timezone.utc)
-                if end_dt > end_limit:
+                end_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M"))
+                end_limit_utc = end_limit_local.astimezone(timezone.utc)
+                if end_dt > end_limit_utc:
                     continue
+
 
             filtered_showtimes.append(st)
 
