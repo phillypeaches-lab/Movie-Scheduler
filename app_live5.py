@@ -9,10 +9,16 @@ from datetime import datetime, timezone
 import sys  # 👈 add this import at the top
 import pytz
 THEATER_TZ = pytz.timezone("America/New_York")
-
+print(datetime.now(timezone.utc))
+print(datetime.utcnow().replace(tzinfo=timezone.utc))
+local_now = now_utc.astimezone(THEATER_TZ)
+print(
+    f"[DEBUG] Current local time ({THEATER_TZ.zone}): {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+    flush=True)
 def get_current_time():
     """Return the current UTC time and a formatted string for debugging."""
-    now_utc = datetime.now(timezone.utc)
+
+    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
     print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
     sys.stdout.flush()  # 👈 ensure it appears in logs
     return now_utc
@@ -34,15 +40,16 @@ BASE_URL = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sch
 # UTILITIES
 # -------------------------------------------------
 def format_showtime(dt):
-    """Format datetime to BigScreen style (AM -> add 'a', PM -> just time)."""
-    hour = dt.hour
-    minute = dt.minute
+    local_dt = dt.astimezone(THEATER_TZ)
+    hour = local_dt.hour
+    minute = local_dt.minute
     if hour < 12:
         display_hour = hour if hour != 0 else 12
         return f"{display_hour}:{minute:02d}a"
     else:
         display_hour = hour if hour <= 12 else hour - 12
         return f"{display_hour}:{minute:02d}"
+
 
 
 def parse_bigscreen_time(t_str, base_date=None):
@@ -58,11 +65,10 @@ def parse_bigscreen_time(t_str, base_date=None):
     hour, minute = map(int, t_str.split(":"))
     if not is_am and hour != 12:
         hour += 12
-    if is_am and hour == 12:
-        hour = 0  # handle 12:xxa as midnight
 
-    local_dt = base_date.replace(hour=hour, minute=minute, tzinfo=THEATER_TZ)
-    return local_dt.astimezone(timezone.utc)
+    # Localize to the theater’s timezone, THEN convert to UTC
+    local_dt = THEATER_TZ.localize(base_date.replace(hour=hour, minute=minute))
+    return local_dt.astimezone(pytz.utc)
 
 
 
