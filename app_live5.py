@@ -9,12 +9,12 @@ from datetime import datetime, timezone
 import sys  # 👈 add this import at the top
 import pytz
 THEATER_TZ = pytz.timezone("America/New_York")
-print(datetime.now(timezone.utc))
-print(datetime.utcnow().replace(tzinfo=timezone.utc))
+now_utc = datetime.now(pytz.utc)
 local_now = now_utc.astimezone(THEATER_TZ)
-print(
-    f"[DEBUG] Current local time ({THEATER_TZ.zone}): {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}",
-    flush=True)
+
+print(f"[DEBUG] Startup UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+print(f"[DEBUG] Startup local time ({THEATER_TZ.zone}): {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+
 def get_current_time():
     """Return the current UTC time and a formatted string for debugging."""
 
@@ -24,7 +24,7 @@ def get_current_time():
     return now_utc
 def get_today_utc_date():
     """Return today's date in UTC (for consistent comparison on Render)."""
-    return datetime.now(timezone.utc).date()
+    return datetime.now(pytz.utc).date()
 
 
 app = Flask(__name__)
@@ -126,7 +126,7 @@ def fetch_showtimes_by_scraping(showdate=None):
 
     today = get_today_utc_date()
     target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(pytz.utc)
 
     merged = {}
 
@@ -162,7 +162,7 @@ def fetch_showtimes_by_scraping(showdate=None):
         filtered_showtimes = []
         for st in showtimes:
             try:
-                dt = parse_bigscreen_time(st)
+                dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate or str(today), "%Y-%m-%d"))
             except Exception:
                 continue
 
@@ -291,21 +291,6 @@ def get_movies():
 
 @app.route("/schedule", methods=["POST"])
 def get_schedule():
-    # Safe debugging — handles missing start_time_str/end_time_str
-    start_time_str_safe = locals().get("start_time_str", None)
-    end_time_str_safe = locals().get("end_time_str", None)
-
-    print(
-        f"[DEBUG] User selected window: {start_time_str_safe or 'N/A'}–{end_time_str_safe or 'N/A'} local ({THEATER_TZ})",
-        flush=True,
-    )
-    try:
-        print(
-            f"[DEBUG] Converted to UTC window: {start_limit_utc if 'start_limit_utc' in locals() else 'N/A'}–{end_limit_utc if 'end_limit_utc' in locals() else 'N/A'}",
-            flush=True,
-        )
-    except Exception as e:
-        print(f"[DEBUG] UTC conversion print skipped: {e}", flush=True)
 
 
     current_time = get_current_time()  # 🔥 This should print to Render logs
@@ -321,7 +306,8 @@ def get_schedule():
 
     start_time_str = data.get("start_time")
     end_time_str = data.get("end_time")
-
+    print(f"[DEBUG] User selected window: {start_time_str or 'N/A'}–{end_time_str or 'N/A'} local ({THEATER_TZ.zone})",
+    flush=True,)
     if not showdate:
         return jsonify({"error": "Must provide showdate"}), 400
 
@@ -338,14 +324,13 @@ def get_schedule():
         for st in m["showtimes"]:
             # Parse showtime and make it UTC-aware
             start_dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate, "%Y-%m-%d"))
-            start_dt = start_dt.replace(tzinfo=timezone.utc)
             end_dt = start_dt + timedelta(minutes=m["runtime"])
 
             # Filter by start_time if provided
             if start_time_str:
                 # interpret user input as local time
                 start_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M"))
-                start_limit_utc = start_limit_local.astimezone(timezone.utc)
+                start_limit_utc = start_limit_local.astimezone(pytz.utc)
                 if start_dt < start_limit_utc:
                     continue
 
@@ -353,7 +338,7 @@ def get_schedule():
             # Filter by end_time if provided
             if end_time_str:
                 end_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M"))
-                end_limit_utc = end_limit_local.astimezone(timezone.utc)
+                end_limit_utc = end_limit_local.astimezone(pytz.utc)
                 if end_dt > end_limit_utc:
                     continue
 
