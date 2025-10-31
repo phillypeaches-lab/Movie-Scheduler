@@ -1,35 +1,12 @@
-#4+new version to tackle timezone shift
+# version: Render timezone-safe
 from flask import Flask, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 from bs4 import BeautifulSoup
 from itertools import permutations, product
 import re
-from datetime import datetime, timezone
 import pytz
 import sys
-
-THEATER_TZ = pytz.timezone("America/New_York")
-
-# Print both UTC and local time at startup
-now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-local_now = now_utc.astimezone(THEATER_TZ)
-
-print(f"[DEBUG] Server boot time UTC:   {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
-print(f"[DEBUG] Server boot time Local: {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
-sys.stdout.flush()
-
-def get_current_time():
-    """Return the current UTC time and a formatted string for debugging."""
-
-    now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-    print(f"[DEBUG] Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
-    sys.stdout.flush()  # 👈 ensure it appears in logs
-    return now_utc
-def get_today_utc_date():
-    """Return today's date in UTC (for consistent comparison on Render)."""
-    return datetime.now(pytz.utc).date()
-
 
 app = Flask(__name__)
 
@@ -38,26 +15,24 @@ app = Flask(__name__)
 # -------------------------------------------------
 THEATER_ID = "4343"
 BASE_URL = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
+THEATER_TZ = pytz.timezone("America/New_York")  # always interpret showtimes in this zone
 
 
 # -------------------------------------------------
-# UTILITIES
+# TIME HELPERS
 # -------------------------------------------------
-def format_showtime(dt):
-    local_dt = dt.astimezone(THEATER_TZ)
-    hour = local_dt.hour
-    minute = local_dt.minute
-    if hour < 12:
-        display_hour = hour if hour != 0 else 12
-        return f"{display_hour}:{minute:02d}a"
-    else:
-        display_hour = hour if hour <= 12 else hour - 12
-        return f"{display_hour}:{minute:02d}"
-
+def get_current_times():
+    """Return current UTC and local theater time (Render runs in UTC)."""
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(THEATER_TZ)
+    print(f"[DEBUG] Render UTC time:   {now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+    print(f"[DEBUG] Theater local time: {now_local.strftime('%Y-%m-%d %H:%M:%S %Z')}", flush=True)
+    sys.stdout.flush()
+    return now_utc, now_local
 
 
 def parse_bigscreen_time(t_str, base_date=None):
-    """Convert BigScreen time (like '10:30a' or '7:20') into UTC-aware datetime."""
+    """Convert BigScreen time (like '10:30a' or '7:20') → localized datetime (aware)."""
     if base_date is None:
         base_date = datetime.now(THEATER_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -70,67 +45,68 @@ def parse_bigscreen_time(t_str, base_date=None):
     if not is_am and hour != 12:
         hour += 12
 
-    # Localize to the theater’s timezone, THEN convert to UTC
+    # Localize to theater timezone
     local_dt = THEATER_TZ.localize(base_date.replace(hour=hour, minute=minute))
-    return local_dt.astimezone(pytz.utc)
+    return local_dt
 
 
+def format_showtime(dt):
+    """Format datetime in local theater time for display."""
+    local_dt = dt.astimezone(THEATER_TZ)
+    hour = local_dt.hour
+    minute = local_dt.minute
+    if hour < 12:
+        display_hour = hour if hour != 0 else 12
+        return f"{display_hour}:{minute:02d}a"
+    else:
+        display_hour = hour if hour <= 12 else hour - 12
+        return f"{display_hour}:{minute:02d}"
 
 
 # -------------------------------------------------
 # SCRAPER FUNCTIONS
 # -------------------------------------------------
 def fetch_available_days():
-    """Scrape available date tabs from BigScreen, only future/present days."""
-    url = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
+    url = BASE_URL
     resp = requests.get(url)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    today = get_today_utc_date()
+    today_local = datetime.now(THEATER_TZ).date()
     days = []
 
     for cell in soup.select("td.scheddaterow, td.scheddaterow_sel"):
         title = cell.get_text(strip=True).replace("\n", " ")
-
-        href = ""
+        href = cell.get("onclick", "") or ""
         link = cell.find("a")
         if link and link.has_attr("href"):
             href = link["href"]
-        else:
-            href = cell.get("onclick", "")
 
         match = re.search(r"showdate=(\d{4}-\d{2}-\d{2})", href)
         if match:
             date_obj = datetime.strptime(match.group(1), "%Y-%m-%d").date()
         else:
-            date_obj = today
+            date_obj = today_local
 
-        if date_obj < today:
-            continue
-
-        days.append({
-            "title": title,
-            "date": date_obj.strftime("%Y-%m-%d")
-        })
+        if date_obj >= today_local:
+            days.append({"title": title, "date": date_obj.strftime("%Y-%m-%d")})
 
     return days
 
 
 def fetch_showtimes_by_scraping(showdate=None):
-    """Scrape movie showtimes from BigScreen and merge exact duplicate titles. Prints all detected showtimes for debugging."""
-    url = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
+    """Scrape all showtimes and filter out past ones (based on theater local time)."""
+    url = BASE_URL
     if showdate:
         url += f"&showdate={showdate}"
-
 
     resp = requests.get(url)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    today = get_today_utc_date()
-    target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
-    now = datetime.now(pytz.utc)
+    today_local = datetime.now(THEATER_TZ).date()
+    target_date = today_local if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
+    now_local = datetime.now(THEATER_TZ)
 
     merged = {}
 
@@ -140,7 +116,7 @@ def fetch_showtimes_by_scraping(showdate=None):
             continue
 
         name = title_elem.get_text(strip=True)
-        title_key = name.strip().lower()
+        title_key = name.lower()
 
         runtime_elem = row.select_one("td.col_movie span.small")
         runtime = 120
@@ -152,53 +128,30 @@ def fetch_showtimes_by_scraping(showdate=None):
 
         showtime_cell = row.select_one("td.col_showtimes")
         showtimes = []
-
         if showtime_cell:
-            # Get entire text of the showtime cell
             cell_text = showtime_cell.get_text(" ", strip=True).lower()
-            # Find ALL times like "11:40a" or "3:55"
             found_times = re.findall(r"\b\d{1,2}:\d{2}a?\b", cell_text)
             showtimes.extend(found_times)
 
-
-        # Deduplicate and filter out past times
         showtimes = sorted(set(showtimes))
         filtered_showtimes = []
         for st in showtimes:
             try:
-                dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate or str(today), "%Y-%m-%d"))
+                dt_local = parse_bigscreen_time(st, base_date=datetime.strptime(showdate, "%Y-%m-%d"))
             except Exception:
                 continue
-
-
-            local_now = datetime.now(THEATER_TZ)
-            dt_local = dt.astimezone(THEATER_TZ)
-            if target_date == local_now.date() and dt_local < local_now:
+            if target_date == today_local and dt_local < now_local:
                 continue
-
-
             filtered_showtimes.append(st)
 
-
-        if not filtered_showtimes:
-            continue
-
-        if title_key in merged:
+        if filtered_showtimes:
+            merged.setdefault(title_key, {"name": name, "runtime": runtime, "showtimes": []})
             merged[title_key]["showtimes"].extend(filtered_showtimes)
-        else:
-            merged[title_key] = {
-                "name": name.strip(),
-                "runtime": runtime,
-                "showtimes": filtered_showtimes
-            }
-
 
     for v in merged.values():
         v["showtimes"] = sorted(set(v["showtimes"]))
 
-
     return list(merged.values())
-
 
 
 # -------------------------------------------------
@@ -212,11 +165,10 @@ def schedule_movies(selected_movies, min_gap=-5):
         for st in m["showtimes"]:
             try:
                 start = parse_bigscreen_time(st)
-            except:
+            except Exception:
                 continue
             end = start + timedelta(minutes=m["runtime"])
             showtimes.append({"movie": m["name"], "start": start, "end": end})
-
         if showtimes:
             movie_showtimes.append(showtimes)
 
@@ -228,14 +180,12 @@ def schedule_movies(selected_movies, min_gap=-5):
             for combo in product(*subset):
                 valid = True
                 total_gap = timedelta(0)
-
                 for i in range(len(combo) - 1):
                     gap = combo[i + 1]["start"] - combo[i]["end"]
                     if gap < timedelta(minutes=min_gap):
                         valid = False
                         break
                     total_gap += gap
-
                 if valid:
                     all_valid_schedules.append({
                         "schedule": combo,
@@ -254,50 +204,21 @@ def schedule_movies(selected_movies, min_gap=-5):
 # -------------------------------------------------
 @app.route("/days", methods=["GET"])
 def get_days():
-    url = f"https://www.bigscreen.com/Marquee.php?theater={THEATER_ID}&view=sched"
-    resp = requests.get(url)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    dates = set()
-    sel = soup.select_one("td.scheddaterow_sel")
-    if sel:
-        text = sel.get_text(strip=True)
-        a = sel.select_one("a")
-        if a and "showdate" in a["href"]:
-            m = re.search(r"showdate=(\d{4}-\d{2}-\d{2})", a["href"])
-            if m:
-                dates.add(m.group(1))
-        else:
-            dates.add(datetime.now().strftime("%Y-%m-%d"))
-
-    for td in soup.select("td.scheddaterow"):
-        a = td.select_one("a")
-        if a and "showdate" in a["href"]:
-            m = re.search(r"showdate=(\d{4}-\d{2}-\d{2})", a["href"])
-            if m:
-                dates.add(m.group(1))
-
-    today = datetime.now().date()
-    showdates = sorted([d for d in dates if datetime.strptime(d, "%Y-%m-%d").date() >= today])
-    return jsonify(showdates)
+    return jsonify(fetch_available_days())
 
 
 @app.route("/movies", methods=["GET"])
 def get_movies():
-    # Debug print to confirm UTC time on Render
-    current_time = get_current_time()
-
     showdate = request.args.get("showdate")
+    get_current_times()  # debug
     movies = fetch_showtimes_by_scraping(showdate)
     return jsonify([m["name"] for m in movies])
 
 
 @app.route("/schedule", methods=["POST"])
 def get_schedule():
+    get_current_times()  # debug on Render
 
-
-    current_time = get_current_time()  # 🔥 This should print to Render logs
     data = request.get_json()
     if not data:
         return jsonify({"error": "Must provide JSON body"}), 400
@@ -307,48 +228,32 @@ def get_schedule():
     showdate = data.get("showdate")
     show_more = data.get("show_more", False)
     MoviesSelected = data.get("MoviesSelected")
-
     start_time_str = data.get("start_time")
     end_time_str = data.get("end_time")
-    print(f"[DEBUG] User selected window: {start_time_str or 'N/A'}–{end_time_str or 'N/A'} local ({THEATER_TZ.zone})",
-    flush=True,)
+
     if not showdate:
         return jsonify({"error": "Must provide showdate"}), 400
 
     movies = fetch_showtimes_by_scraping(showdate)
-    if not movies:
-        return jsonify({"error": f"No movies found for {showdate}"}), 404
-
     selected_movies = [m for m in movies if m["name"] in selected_titles]
-    if not selected_movies:
-        return jsonify({"error": "None of the selected movies are available on this date"}), 404
 
     def filter_timeframe(m):
         filtered_showtimes = []
         for st in m["showtimes"]:
-            # Parse showtime and make it UTC-aware
             start_dt = parse_bigscreen_time(st, base_date=datetime.strptime(showdate, "%Y-%m-%d"))
             end_dt = start_dt + timedelta(minutes=m["runtime"])
 
-            # Filter by start_time if provided
             if start_time_str:
-                # interpret user input as local time
-                start_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M"))
-                start_limit_utc = start_limit_local.astimezone(pytz.utc)
-                if start_dt < start_limit_utc:
+                start_limit = THEATER_TZ.localize(datetime.strptime(f"{showdate} {start_time_str}", "%Y-%m-%d %H:%M"))
+                if start_dt < start_limit:
                     continue
 
-
-            # Filter by end_time if provided
             if end_time_str:
-                end_limit_local = THEATER_TZ.localize(datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M"))
-                end_limit_utc = end_limit_local.astimezone(pytz.utc)
-                if end_dt > end_limit_utc:
+                end_limit = THEATER_TZ.localize(datetime.strptime(f"{showdate} {end_time_str}", "%Y-%m-%d %H:%M"))
+                if end_dt > end_limit:
                     continue
-
 
             filtered_showtimes.append(st)
-
         m["showtimes"] = filtered_showtimes
         return bool(filtered_showtimes)
 
@@ -363,10 +268,7 @@ def get_schedule():
     best_schedule = all_schedules[0]
 
     def format_schedule(s):
-        lines = [
-            f"Date: {showdate}",
-            f"{len(s['schedule'])} out of {MoviesSelected} movies selected"
-        ]
+        lines = [f"Date: {showdate}", f"{len(s['schedule'])} out of {MoviesSelected} movies selected"]
         for item in s["schedule"]:
             start_str = format_showtime(item["start"])
             end_str = format_showtime(item["end"])
@@ -384,4 +286,5 @@ def get_schedule():
 # RUN LOCALLY
 # -------------------------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5004)
+    get_current_times()  # print local+UTC when starting
+    app.run(host="0.0.0.0", port=5003)
