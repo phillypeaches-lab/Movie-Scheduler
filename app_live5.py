@@ -144,7 +144,11 @@ def fetch_showtimes_by_scraping(showdate=None):
 
     today = get_eastern_today()
     now = get_eastern_now()
-    target_date = today if showdate is None else datetime.strptime(showdate, "%Y-%m-%d").date()
+    if not showdate:  # handles None or empty string
+        target_date = today
+    else:
+        target_date = datetime.strptime(showdate, "%Y-%m-%d").date()
+
 
     merged = {}
 
@@ -341,4 +345,4 @@ def get_schedule():
 # RUN LOCALLY
 # -------------------------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5003)
+    app.run(host="0.0.0.0", port=5004)
