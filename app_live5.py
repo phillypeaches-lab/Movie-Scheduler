@@ -79,7 +79,7 @@ def format_showtime(dt):
 def parse_bigscreen_time(t_str, base_date=None):
     """Convert BigScreen time (like '10:30a' or '7:20') into datetime using Eastern time."""
     if base_date is None:
-        base_date = datetime.combine(get_eastern_today(), datetime.min.time())
+        base_date = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
 
     t_str = t_str.strip().lower()
     is_am = t_str.endswith("a")
@@ -257,7 +257,10 @@ def schedule_movies(selected_movies, min_gap=-5):
 @app.route("/days", methods=["GET"])
 def get_days():
     days = fetch_available_days()
-    return jsonify(days)
+    # Only return list of date strings to match Shortcut expectation
+    simple_dates = [d["date"] for d in days if "date" in d]
+    return jsonify(simple_dates)
+
 
 
 @app.route("/movies", methods=["GET"])
