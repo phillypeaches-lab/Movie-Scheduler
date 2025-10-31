@@ -263,8 +263,19 @@ def get_days():
 @app.route("/movies", methods=["GET"])
 def get_movies():
     showdate = request.args.get("showdate")
+
+    import json
+    if isinstance(showdate, str) and showdate.startswith("{"):
+        try:
+            parsed = json.loads(showdate)
+            if isinstance(parsed, dict) and "date" in parsed:
+                showdate = parsed["date"]
+        except Exception:
+            pass
+
     movies = fetch_showtimes_by_scraping(showdate)
     return jsonify([m["name"] for m in movies])
+
 
 
 @app.route("/schedule", methods=["POST"])
@@ -278,11 +289,23 @@ def get_schedule():
     showdate = data.get("showdate")
     show_more = data.get("show_more", False)
     MoviesSelected = data.get("MoviesSelected")
+
     start_time_str = data.get("start_time")
     end_time_str = data.get("end_time")
 
+    # ✅ Normalize showdate if frontend sent full object as JSON string
+    import json
+    if isinstance(showdate, str) and showdate.startswith("{"):
+        try:
+            parsed = json.loads(showdate)
+            if isinstance(parsed, dict) and "date" in parsed:
+                showdate = parsed["date"]
+        except Exception:
+            pass
+
     if not showdate:
         return jsonify({"error": "Must provide showdate"}), 400
+
 
     movies = fetch_showtimes_by_scraping(showdate)
     if not movies:
